@@ -1,0 +1,657 @@
+
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Layout } from "@/components/layout/Layout";
+import { useFetchData } from "@/hooks/useFetchData";
+import { useMutateData } from "@/hooks/useMutateData";
+import { toast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PlusCircle, Calendar, CheckCircle2, CircleX, Clock, ArrowRightCircle, ArrowLeftCircle, RefreshCw } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import SprintForm from "@/components/sprint/SprintForm";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+const Sprints = ({ viewCurrent = false }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState("all");
+  const [sprintFormOpen, setSprintFormOpen] = useState(false);
+  const [selectedSprint, setSelectedSprint] = useState(null);
+  const [editingSprint, setEditingSprint] = useState(null);
+
+  // Fetch sprints
+  const {
+    data: sprints,
+    isLoading: isLoadingSprints,
+    isError: isErrorSprints,
+    refetch: refetchSprints,
+  } = useFetchData("sprints", () =>
+    viewCurrent ? ["sprints", "current"] : ["sprints"]
+  );
+
+  // Fetch backlog items
+  const {
+    data: backlogItems,
+    isLoading: isLoadingBacklog,
+    refetch: refetchBacklogItems,
+  } = useFetchData("backlog-items", ["backlog-items"]);
+
+  // Mutations
+  const { mutate: updateSprintStatus } = useMutateData();
+  const { mutate: updateBacklogItem } = useMutateData();
+
+  useEffect(() => {
+    if (viewCurrent) {
+      // Find active sprint and set it as selected
+      const activeSprint = sprints?.find(sprint => sprint.status === "active");
+      if (activeSprint) {
+        setSelectedSprint(activeSprint);
+        setActiveTab("active");
+      }
+    }
+  }, [sprints, viewCurrent]);
+
+  const handleCreateSprint = () => {
+    setEditingSprint(null);
+    setSprintFormOpen(true);
+  };
+
+  const handleEditSprint = (sprint) => {
+    setEditingSprint(sprint);
+    setSprintFormOpen(true);
+  };
+
+  const handleSprintFormClose = (refreshData = false) => {
+    setSprintFormOpen(false);
+    if (refreshData) {
+      refetchSprints();
+    }
+  };
+
+  const handleSprintSelect = (sprint) => {
+    setSelectedSprint(sprint.id === selectedSprint?.id ? null : sprint);
+  };
+
+  const handleStartSprint = async (sprint) => {
+    try {
+      await updateSprintStatus({
+        resource: "sprints",
+        id: sprint.id,
+        data: { status: "active", started_at: new Date().toISOString() },
+      });
+
+      // Update any previously active sprint to completed
+      const previouslyActive = sprints.find(
+        (s) => s.status === "active" && s.id !== sprint.id
+      );
+      if (previouslyActive) {
+        await updateSprintStatus({
+          resource: "sprints",
+          id: previouslyActive.id,
+          data: { status: "completed", completed_at: new Date().toISOString() },
+        });
+      }
+
+      toast({
+        title: "Sprint Started",
+        description: `Sprint "${sprint.name}" has been started successfully.`,
+      });
+      
+      refetchSprints();
+    } catch (error) {
+      console.error("Error starting sprint:", error);
+      toast({
+        title: "Error",
+        description: "Failed to start the sprint. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCompleteSprint = async (sprint) => {
+    try {
+      await updateSprintStatus({
+        resource: "sprints",
+        id: sprint.id,
+        data: { status: "completed", completed_at: new Date().toISOString() },
+      });
+
+      toast({
+        title: "Sprint Completed",
+        description: `Sprint "${sprint.name}" has been marked as completed.`,
+      });
+      
+      refetchSprints();
+    } catch (error) {
+      console.error("Error completing sprint:", error);
+      toast({
+        title: "Error",
+        description: "Failed to complete the sprint. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const addItemToSprint = async (sprintId, itemId) => {
+    if (!itemId || !sprintId) return;
+    
+    try {
+      await updateBacklogItem({
+        resource: "backlog-items",
+        id: itemId,
+        data: { sprint_id: sprintId },
+      });
+
+      toast({
+        title: "Item Added",
+        description: "Item added to sprint successfully.",
+      });
+      
+      refetchBacklogItems();
+      refetchSprints();
+    } catch (error) {
+      console.error("Error adding item to sprint:", error);
+      toast({
+        title: "Error",
+        description: "Failed to add item to sprint. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const removeItemFromSprint = async (itemId) => {
+    if (!itemId) return;
+    
+    try {
+      await updateBacklogItem({
+        resource: "backlog-items",
+        id: itemId,
+        data: { sprint_id: null },
+      });
+
+      toast({
+        title: "Item Removed",
+        description: "Item removed from sprint successfully.",
+      });
+      
+      refetchBacklogItems();
+      refetchSprints();
+    } catch (error) {
+      console.error("Error removing item from sprint:", error);
+      toast({
+        title: "Error",
+        description: "Failed to remove item from sprint. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const updateItemStatus = async (itemId, status) => {
+    if (!itemId) return;
+    
+    try {
+      await updateBacklogItem({
+        resource: "backlog-items",
+        id: itemId,
+        data: { status },
+      });
+
+      toast({
+        title: "Status Updated",
+        description: `Item status updated to ${status}.`,
+      });
+      
+      refetchBacklogItems();
+    } catch (error) {
+      console.error("Error updating item status:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update item status. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Calculate sprint progress
+  const calculateSprintProgress = (sprint) => {
+    if (!sprint || !backlogItems) return 0;
+    
+    const sprintItems = backlogItems.filter(item => item.sprint_id === sprint.id);
+    if (sprintItems.length === 0) return 0;
+    
+    const completedItems = sprintItems.filter(item => item.status === "done").length;
+    return Math.round((completedItems / sprintItems.length) * 100);
+  };
+
+  // Filter sprints based on active tab
+  const filteredSprints = sprints?.filter(sprint => {
+    if (activeTab === "all") return true;
+    if (activeTab === "active") return sprint.status === "active";
+    if (activeTab === "upcoming") return sprint.status === "planned";
+    if (activeTab === "completed") return sprint.status === "completed";
+    return true;
+  }) || [];
+
+  // Get backlog items for selected sprint
+  const sprintBacklogItems = selectedSprint
+    ? backlogItems?.filter(item => item.sprint_id === selectedSprint.id) || []
+    : [];
+
+  // Get available backlog items (not assigned to any sprint)
+  const availableBacklogItems = backlogItems?.filter(item => !item.sprint_id) || [];
+
+  // Loading state
+  if (isLoadingSprints) {
+    return (
+      <Layout>
+        <div className="container py-6">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold">Sprints</h1>
+          </div>
+          <div className="grid gap-4">
+            {[1, 2, 3].map(i => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-8 w-3/4" />
+                  <Skeleton className="h-4 w-1/2 mt-2" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full mt-2" />
+                </CardContent>
+                <CardFooter>
+                  <Skeleton className="h-10 w-24 mr-2" />
+                  <Skeleton className="h-10 w-24" />
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  // Error state
+  if (isErrorSprints) {
+    return (
+      <Layout>
+        <div className="container py-6">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold">Sprints</h1>
+          </div>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <CircleX className="mx-auto h-12 w-12 text-destructive" />
+                <h2 className="mt-2 text-xl font-semibold">Error Loading Sprints</h2>
+                <p className="mt-1 text-muted-foreground">
+                  There was an error loading the sprints data.
+                </p>
+                <Button onClick={() => refetchSprints()} className="mt-4">
+                  <RefreshCw className="mr-2 h-4 w-4" /> Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <div className="container py-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <h1 className="text-2xl font-bold">
+            {viewCurrent ? "Current Sprint" : "Sprints"}
+          </h1>
+          {!viewCurrent && (
+            <div className="flex gap-2">
+              <Button onClick={handleCreateSprint}>
+                <PlusCircle className="mr-2 h-4 w-4" /> New Sprint
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate("/sprints/current")}
+              >
+                <Clock className="mr-2 h-4 w-4" /> View Current Sprint
+              </Button>
+            </div>
+          )}
+          {viewCurrent && (
+            <Button variant="outline" onClick={() => navigate("/sprints")}>
+              <Calendar className="mr-2 h-4 w-4" /> All Sprints
+            </Button>
+          )}
+        </div>
+
+        {/* Sprints List */}
+        {!viewCurrent && (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+            <TabsList className="mb-4">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="active">Active</TabsTrigger>
+              <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+              <TabsTrigger value="completed">Completed</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value={activeTab} className="mt-0">
+              {filteredSprints.length === 0 ? (
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="text-center py-6">
+                      <Calendar className="mx-auto h-12 w-12 text-muted-foreground" />
+                      <h3 className="mt-2 text-lg font-medium">No Sprints Found</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {activeTab === "all"
+                          ? "You haven't created any sprints yet."
+                          : activeTab === "active"
+                          ? "There are no active sprints."
+                          : activeTab === "upcoming"
+                          ? "There are no upcoming sprints."
+                          : "There are no completed sprints."}
+                      </p>
+                      {activeTab === "all" && (
+                        <Button
+                          onClick={handleCreateSprint}
+                          className="mt-4"
+                          variant="outline"
+                        >
+                          <PlusCircle className="mr-2 h-4 w-4" /> Create Your First Sprint
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid gap-4">
+                  {filteredSprints.map((sprint) => (
+                    <Card
+                      key={sprint.id}
+                      className={`${
+                        selectedSprint?.id === sprint.id
+                          ? "border-primary"
+                          : ""
+                      }`}
+                    >
+                      <CardHeader>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <CardTitle>{sprint.name}</CardTitle>
+                            <CardDescription>
+                              {new Date(sprint.start_date).toLocaleDateString()} -{" "}
+                              {new Date(sprint.end_date).toLocaleDateString()}
+                            </CardDescription>
+                          </div>
+                          <Badge
+                            variant={
+                              sprint.status === "active"
+                                ? "default"
+                                : sprint.status === "completed"
+                                ? "outline"
+                                : "secondary"
+                            }
+                          >
+                            {sprint.status === "active"
+                              ? "Active"
+                              : sprint.status === "completed"
+                              ? "Completed"
+                              : "Planned"}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex flex-col space-y-2">
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>Progress</span>
+                            <span>{calculateSprintProgress(sprint)}%</span>
+                          </div>
+                          <Progress value={calculateSprintProgress(sprint)} />
+                        </div>
+                      </CardContent>
+                      <CardFooter className="flex justify-between">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSprintSelect(sprint)}
+                        >
+                          {selectedSprint?.id === sprint.id ? "Hide Details" : "View Details"}
+                        </Button>
+                        <div className="flex gap-2">
+                          {sprint.status === "planned" && (
+                            <Button
+                              size="sm"
+                              onClick={() => handleStartSprint(sprint)}
+                            >
+                              <ArrowRightCircle className="mr-2 h-4 w-4" /> Start
+                            </Button>
+                          )}
+                          {sprint.status === "active" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCompleteSprint(sprint)}
+                            >
+                              <CheckCircle2 className="mr-2 h-4 w-4" /> Complete
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditSprint(sprint)}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
+
+        {/* Selected Sprint Details */}
+        {(selectedSprint || viewCurrent) && (
+          <div className="mt-6">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle>{selectedSprint?.name}</CardTitle>
+                    <CardDescription>
+                      {selectedSprint &&
+                        `${new Date(
+                          selectedSprint.start_date
+                        ).toLocaleDateString()} - ${new Date(
+                          selectedSprint.end_date
+                        ).toLocaleDateString()}`}
+                    </CardDescription>
+                  </div>
+                  {selectedSprint && (
+                    <Badge
+                      variant={
+                        selectedSprint.status === "active"
+                          ? "default"
+                          : selectedSprint.status === "completed"
+                          ? "outline"
+                          : "secondary"
+                      }
+                    >
+                      {selectedSprint.status === "active"
+                        ? "Active"
+                        : selectedSprint.status === "completed"
+                        ? "Completed"
+                        : "Planned"}
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {selectedSprint && (
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Description</h3>
+                      <p className="text-muted-foreground">
+                        {selectedSprint.description || "No description provided."}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-medium mb-2">Sprint Items</h3>
+                      {sprintBacklogItems.length === 0 ? (
+                        <div className="text-center py-6 border rounded-md bg-muted/20">
+                          <p className="text-sm text-muted-foreground">
+                            No items in this sprint yet.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {sprintBacklogItems.map((item) => (
+                            <Card key={item.id} className="p-4">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <h4 className="font-medium">{item.title}</h4>
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    {item.description?.substring(0, 100)}
+                                    {item.description?.length > 100 ? "..." : ""}
+                                  </p>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                  <Badge variant={item.status === "todo" ? "secondary" : item.status === "in_progress" ? "default" : "outline"}>
+                                    {item.status === "todo"
+                                      ? "To Do"
+                                      : item.status === "in_progress"
+                                      ? "In Progress"
+                                      : "Done"}
+                                  </Badge>
+                                  <div className="flex gap-2 mt-2">
+                                    {item.status === "todo" && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => updateItemStatus(item.id, "in_progress")}
+                                      >
+                                        Start
+                                      </Button>
+                                    )}
+                                    {item.status === "in_progress" && (
+                                      <Button
+                                        size="sm"
+                                        onClick={() => updateItemStatus(item.id, "done")}
+                                      >
+                                        Complete
+                                      </Button>
+                                    )}
+                                    {selectedSprint.status !== "completed" && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => removeItemFromSprint(item.id)}
+                                      >
+                                        Remove
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedSprint.status !== "completed" && (
+                      <div>
+                        <h3 className="text-lg font-medium mb-2">Add Items from Backlog</h3>
+                        {isLoadingBacklog ? (
+                          <div className="space-y-2">
+                            {[1, 2, 3].map((i) => (
+                              <Card key={i} className="p-4">
+                                <div className="flex justify-between">
+                                  <div>
+                                    <Skeleton className="h-5 w-40" />
+                                    <Skeleton className="h-4 w-60 mt-2" />
+                                  </div>
+                                  <Skeleton className="h-9 w-24" />
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : availableBacklogItems.length === 0 ? (
+                          <div className="text-center py-6 border rounded-md bg-muted/20">
+                            <p className="text-sm text-muted-foreground">
+                              No available backlog items. Create some in the Backlog section.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {availableBacklogItems.map((item) => (
+                              <Card key={item.id} className="p-4">
+                                <div className="flex justify-between items-start">
+                                  <div>
+                                    <h4 className="font-medium">{item.title}</h4>
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                      {item.description?.substring(0, 100)}
+                                      {item.description?.length > 100 ? "..." : ""}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => addItemToSprint(selectedSprint.id, item.id)}
+                                  >
+                                    Add to Sprint
+                                  </Button>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+
+      {/* Sprint Form Dialog */}
+      <Dialog open={sprintFormOpen} onOpenChange={setSprintFormOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingSprint ? "Edit Sprint" : "Create New Sprint"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingSprint
+                ? "Update the details of your sprint."
+                : "Add a new sprint to your project."}
+            </DialogDescription>
+          </DialogHeader>
+          <SprintForm
+            sprint={editingSprint}
+            onClose={handleSprintFormClose}
+          />
+        </DialogContent>
+      </Dialog>
+    </Layout>
+  );
+};
+
+export default Sprints;
